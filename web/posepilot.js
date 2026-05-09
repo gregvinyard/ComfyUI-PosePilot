@@ -58,16 +58,45 @@ app.registerExtension({
         }
       }
 
-      // Refresh view list whenever glb_path changes (new pose selected).
+      const CANONICAL_MODEL = "3d/posepilot_current.glb";
+
+      // Ensure the canonical model file is always an option and selected by default.
+      function syncModelFile() {
+        const modelW = getWidget("model_file");
+        if (!modelW) return;
+        if (modelW.options?.values && !modelW.options.values.includes(CANONICAL_MODEL)) {
+          modelW.options.values.unshift(CANONICAL_MODEL);
+        }
+        // Setting .value triggers the Load3DConfiguration interceptor, which
+        // reloads the model in the viewport even if the string is unchanged.
+        modelW.value = CANONICAL_MODEL;
+      }
+
+      // After each execute the Selector has already copied the new GLB to
+      // posepilot_current.glb — reload the viewport so the user sees it.
+      const _origOnExecuted = node.onExecuted;
+      node.onExecuted = function(output) {
+        _origOnExecuted?.call(this, output);
+        syncModelFile();
+      };
+
+      // Refresh view list whenever glb_path changes (workflow load / configure).
       const glbW = getWidget("glb_path");
       if (glbW) {
         let _glbVal = glbW.value ?? "";
         Object.defineProperty(glbW, "value", {
           get() { return _glbVal; },
-          set(v) { _glbVal = v; refreshViews(v); },
+          set(v) { _glbVal = v; refreshViews(v); syncModelFile(); },
           configurable: true,
         });
       }
+
+      // When a saved workflow is loaded, ensure model_file is set correctly.
+      const _origViewfinderConfigure = node.onConfigure;
+      node.onConfigure = function(info) {
+        _origViewfinderConfigure?.call(node, info);
+        syncModelFile();
+      };
 
       // "Save View" button
       node.addWidget("button", "Save View", null, async () => {
@@ -188,7 +217,7 @@ app.registerExtension({
       if (!libW || !poseW) return;
 
       async function refreshPoses(library) {
-        if (!library?.trim() || library === "") return;
+        if (!library?.trim()) return;
         try {
           const resp = await api.fetchApi(
             `/posepilot/list_glbs?library=${encodeURIComponent(library)}`
@@ -216,7 +245,6 @@ app.registerExtension({
           if (!libs.includes(libW.value)) {
             libW.value = libs[0];
           }
-          // Poses for the current library may not be loaded yet on first paint.
           await refreshPoses(libW.value);
           app.graph.setDirtyCanvas(true);
         } catch (e) {
@@ -238,8 +266,7 @@ app.registerExtension({
       const _origConfigure = node.onConfigure;
       node.onConfigure = function(info) {
         _origConfigure?.call(node, info);
-        const lib = libW.value;
-        if (lib) refreshPoses(lib);
+        if (libW.value) refreshPoses(libW.value);
       };
 
       // Populate both dropdowns when the node is first created.

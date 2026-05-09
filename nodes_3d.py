@@ -91,6 +91,12 @@ class PosePilot3D(IO.ComfyNode):
             if fp.suffix.lower() in {".gltf", ".glb", ".obj", ".fbx", ".stl"}
         )
 
+        # Ensure the canonical PosePilot file is always the default/first option
+        # (Selector copies the active pose here; it may not exist at startup time)
+        canonical = "3d/posepilot_current.glb"
+        if canonical not in files:
+            files.insert(0, canonical)
+
         return IO.Schema(
             node_id="PosePilot3D",
             display_name="Pose Pilot: Viewfinder",
@@ -105,8 +111,9 @@ class PosePilot3D(IO.ComfyNode):
                 IO.Combo.Input(
                     "model_file",
                     options=files,
+                    default=canonical,
                     upload=IO.UploadType.model,
-                    tooltip="3-D model to display (must match the GLB selected by PosePilotSelector)",
+                    tooltip="3-D model displayed in the viewport. Auto-managed when glb_path is connected.",
                 ),
                 IO.Load3D.Input("image", optional=True),
                 IO.String.Input(
@@ -187,7 +194,15 @@ class PosePilot3D(IO.ComfyNode):
             camera_info = None
 
         # ── FK from GLB ───────────────────────────────────────────────────
-        effective_glb = glb_path.strip() or folder_paths.get_annotated_filepath(model_file)
+        effective_glb = glb_path.strip()
+        if not effective_glb:
+            fallback = folder_paths.get_annotated_filepath(model_file)
+            if not Path(fallback).exists():
+                raise FileNotFoundError(
+                    "No GLB found. Connect PosePilotSelector → glb_path, or execute the "
+                    "Selector node first so it creates posepilot_current.glb."
+                )
+            effective_glb = fallback
         joint_positions, _, _ = load_glb_joints(effective_glb)
 
         # Fall back to a default frontal camera if the widget hasn't rendered yet
