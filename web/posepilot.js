@@ -224,17 +224,23 @@ app.registerExtension({
         }
       }
 
-      // Intercept library.value changes to refresh the pose list.
-      // Also fires on workflow-load (LiteGraph sets widget.value during configure()).
-      let _libValue = libW.value ?? "";
-      Object.defineProperty(libW, "value", {
-        get() { return _libValue; },
-        set(v) {
-          _libValue = v;
-          refreshPoses(v);
-        },
-        configurable: true,
-      });
+      // Combo widgets fire widget.callback on user selection — that's the
+      // reliable signal for dropdowns (Object.defineProperty on .value works
+      // for string inputs but not for combo selection events).
+      const _origLibCallback = libW.callback;
+      libW.callback = function(value) {
+        _origLibCallback?.call(this, value);
+        refreshPoses(value);
+      };
+
+      // When a saved workflow is loaded, LiteGraph restores widget values via
+      // node.configure() AFTER onNodeCreated — hook it to repopulate poses.
+      const _origConfigure = node.onConfigure;
+      node.onConfigure = function(info) {
+        _origConfigure?.call(node, info);
+        const lib = libW.value;
+        if (lib) refreshPoses(lib);
+      };
 
       // Populate both dropdowns when the node is first created.
       refreshLibraries();
